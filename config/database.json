@@ -1,0 +1,7 @@
+{
+  "user": "osboxes",
+  "password": "osboxes.org",
+  "host": "127.0.0.1",
+  "database": "entablar",
+  "db_date_format": "%Y-%m-%d"
+}

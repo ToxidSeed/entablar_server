@@ -1,0 +1,5 @@
+UPDATE TABLA
+SET
+estado_tabla_id = 0,
+FCH_MODIFICACION = CURRENT_DATE()
+WHERE TABLA_ID = %(tabla_id)s
