@@ -5,6 +5,7 @@ from controller.ProveedorBD import ProveedorBD
 from export.script.oracle.TableCreator import TableCreator
 from helper.Response import Response
 
+
 class Tabla:
     ESTADO_TABLA_ELIMINADO = 0
     DEFAULT_ID = -1
@@ -59,8 +60,8 @@ class Tabla:
         if 'dbms_id' in tabla_dict:
             if tabla_dict["dbms_id"] is not None:
                 dbms_obj = self.model.get_single_result(
-                    self.model.get_query('proveedor_bd_get'),
-                    (tabla_dict["dbms_id"],)
+                    script_name = 'proveedor_bd_get',
+                    params = (tabla_dict["dbms_id"],)
                 )
                 if dbms_obj is not None:
                     tabla_dict["dbms_nombre"] = dbms_obj["nombre"]
@@ -71,8 +72,8 @@ class Tabla:
         if 'estado_tabla_id' in tabla_dict:
             if tabla_dict["estado_tabla_id"] is not None:
                 estado_tabla_obj = self.model.get_single_result(
-                    self.model.get_query('estado_tabla_get'),
-                    tabla_dict
+                    script_name = 'estado_tabla_get',                    
+                    params = tabla_dict
                 )
                 if estado_tabla_obj is not None:
                     tabla_dict["estado_tabla_nombre"] = estado_tabla_obj["nombre"]

@@ -2,13 +2,15 @@ from flask import Flask, request, jsonify, send_file
 from flask_restful import Resource, Api
 from flask_cors import CORS
 import traceback
-import sys
-
+import sys, os
 import json
 
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = "1"
 app = Flask(__name__)
+app.secret_key = '5338108e21c05d7e72f443bb1951cdaf64c7f25da6338fbc'
 CORS(app,expose_headers=["Content-Disposition", "file_name"])
 api = Api(app)
+
 
 
 class EntryAPI(Resource):
