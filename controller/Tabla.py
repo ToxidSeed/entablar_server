@@ -1,42 +1,81 @@
-from model.ModelTabla import ModelTabla
+
+from helper.Transformer import Transformer
+from helper.Response import Response, JsonResponse
+import helper.Database as hdb
+from model.Objeto import Objeto
+from model.ObjetoProps import ObjetoProps
 from domain.DomainTabla import DomainTabla
 from controller.Campo import Campo
-from controller.ProveedorBD import ProveedorBD
 from export.script.oracle.TableCreator import TableCreator
-from helper.Response import Response
+from app import db
+from sqlalchemy import func
+from datetime import datetime
+from model.Estado import Estado
+
+from aux.EstadoObjeto import EstadoObjeto
+import aux.TipoObjeto as TipoObjeto
+import aux.EstadoCodigo as EstadoCodigo
+
+from sqlalchemy import and_, text
 
 
 class Tabla:
     ESTADO_TABLA_ELIMINADO = 0
-    DEFAULT_ID = -1
+    ESTADO_TABLA_REGISTRADO =1    
+    TIPO_OBJETO_TABLA = 2
 
     def __init__(self):
-        self.model = ModelTabla()
+        self.model = None
         self.answer = None
         pass
 
     def guardar(self, data={}):
-        obj = DomainTabla()
-        obj.nombre = data["nombre"]
-        obj.descripcion = data["descripcion"]
-        obj.dbms_id = data["dbms_id"]
+        tabla_id = data["tabla_id"]
 
-        # Si no se envía el dato de la tabla
-        if data["tabla_id"] in [0, ""]:
-            self.model.insertar(obj)
-            self.answer = Response("00001", obj.__dict__, (obj.tabla_id, obj.nombre))
+        tabla = Objeto(
+            nombre=data["nombre"], 
+            tipo_objeto_id=self.TIPO_OBJETO_TABLA,
+            dbms_id=data["dbms_id"],            
+            objeto_padre_id=data["esquema_id"],
+            desc_abreviada=data["desc_abreviada"],
+            desc_completa=data["dçesc_completa"],
+            fch_modificacion=datetime.now()
+        )
+
+        if tabla_id in [0,""]:
+            tabla.estado_id = self.ESTADO_TABLA_ELIMINADO
+            tabla.fch_creacion=datetime.now()
+            db.session.add(tabla)                        
+            db.session.flush()
+
+            #database_id
+            #esquema_id
+            database_id_prop = ObjetoProps(objeto_id = tabla.id,nombre = "DATABASE_ID",valor=data["database_id"], fch_creacion =datetime.now(), fch_modificacion=datetime.now()) 
+            db.session.add(database_id_prop)            
         else:
-            obj.tabla_id = data["tabla_id"]
-            self.model.actualizar(obj)
-            self.answer = Response("00001", obj.__dict__)
+            tabla_to_update = Objeto.query.filter_by(id=tabla_id).first()
 
-        return self.answer.__dict__
+        message = "Se ha guardado correctamente la tabla con id: {}".format(tabla.id)
+        extradata  = {
+            "tabla_id":tabla.id,
+            "fch_creacion":tabla.fch_creacion
+        }
+
+        db.session.commit()
+        
+        return Response(msg=message, extradata=extradata).get()
+
+        #return self.answer.__dict__
 
     def eliminar(self, data={}):
-        stmt = self.model.get_query("tabla_eliminar")
-        self.model.execute_update(stmt, data)
-        self.answer = Response("00003", msg_data=(data["tabla_id"],))
-        return self.answer.__dict__
+        ids_eliminar = data['ids_eliminar']
+
+        for identifier in ids_eliminar:                      
+            db.session.query(Objeto).filter_by(id = identifier).update({"estado_id": EstadoCodigo.OBJETO_ELIMINADO})
+            db.session.flush()
+
+        db.session.commit()
+        
 
     def recuperar(self, data={}):
         stmt = self.model.get_query("tabla_recuperar")
@@ -44,15 +83,29 @@ class Tabla:
         self.answer = Response("00004", msg_data=(data["tabla_id"],))
         return self.answer.__dict__
 
-    def get_object(self, data={}):
-        params = (data["tabla_id"],)
-        obj = self.model.get_object(params)
-        obj_dict = obj.__dict__
+    def get(self, args={}):
 
-        self.get_dbms(obj_dict)
-        self.get_estado(obj_dict)
+        tabla_id = args["tabla_id"]
+        tabla = Objeto.query.filter(        
+            Objeto.id == tabla_id
+        ).one()
 
-        return obj_dict
+        tabla_dict = Transformer(tabla).model_to_dict()
+
+        #otros datos de la tabla
+        tabla_props = ObjetoProps.query.filter(
+            ObjetoProps.objeto_id == tabla_id
+        ).all()
+
+        for element in tabla_props:
+            if element.nombre == "DATABASE_ID":
+                tabla_dict["database_id"] = element.valor
+
+        #estado de la tabla
+        estado = EstadoObjeto().get(tabla.estado_id)
+        tabla_dict["estado_nombre"] = estado.nombre
+
+        return Response(input_data=tabla_dict).get()    
 
     def get_dbms(self, tabla_dict=None):
         tabla_dict["dbms_nombre"] = ""
@@ -95,12 +148,8 @@ class Tabla:
         }
         return response
 
-    def exportar(self, params={}):
+    def exportar(self, params={}):  
         obj_tabla = self.get_object(params)
-        obj_ctrl_dbms = ProveedorBD()
-        obj_dbms = obj_ctrl_dbms.get_object({
-            'proveedor_bd_id':obj_tabla['dbms_id']
-        })
         obj_campo = Campo()
         list_campos_tabla = obj_campo.get_campos_por_tabla(params)
 
@@ -109,4 +158,11 @@ class Tabla:
         obj_table_creator.fields = list_campos_tabla['rows']
         return obj_table_creator.create_table()
 
+class TablaList:
+    def __init__(self):
+        pass
 
+    def get(self, args={}):        
+        sql = text(hdb._get_query('tabla_list').format(**args)) 
+        results_set = db.engine.execute(sql)        
+        return Response(input_data=results_set).get()

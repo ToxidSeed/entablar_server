@@ -1,17 +1,21 @@
 from flask import Flask, request, jsonify, send_file
 from flask_restful import Resource, Api
 from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
 import traceback
 import sys, os
 import json
 
+
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = "1"
 app = Flask(__name__)
-app.secret_key = '5338108e21c05d7e72f443bb1951cdaf64c7f25da6338fbc'
+app.secret_key = 'app_secret_key'
+
+app.config.from_object("config")
 CORS(app,expose_headers=["Content-Disposition", "file_name"])
+
+db = SQLAlchemy(app)
 api = Api(app)
-
-
 
 class EntryAPI(Resource):
     def get(self, module_name, class_name, method_name):
@@ -53,9 +57,15 @@ class ImageLoader(Resource):
         except FileNotFoundError:
             return send_file("./defaults/default.png", mimetype='image/jpg')
 
+class ConfirmRegistration(Resource):
+    def get(self):
+        from controller.SessionManager import SessionManager
+        token = request.args.get('token')
+        SessionManager().confirm(token)
 
 api.add_resource(EntryAPI, '/entablar/<string:module_name>/<string:class_name>/<string:method_name>')
+api.add_resource(ConfirmRegistration, '/entablar/ConfirmRegistration',endpoint="confirm")
 api.add_resource(ImageLoader, '/entablar/<string:image_loader>/')
 
 
-app.run(debug=True)
+#app.run(debug=True)
