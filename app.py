@@ -9,7 +9,6 @@ import json
 
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = "1"
 app = Flask(__name__)
-app.secret_key = '*****'
 
 app.config.from_object("config")
 CORS(app,expose_headers=["Content-Disposition", "file_name"])
