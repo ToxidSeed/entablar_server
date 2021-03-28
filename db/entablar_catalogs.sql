@@ -1,0 +1,1 @@
+select * from tipo_objeto to2 ;

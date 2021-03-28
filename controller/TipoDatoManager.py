@@ -2,11 +2,13 @@
 from model.TipoDato import TipoDato
 from domain.DomainTipoDato import DomainTipoDato
 from model.ProveedorBD import ProveedorBD
-import os, json, re, ast
-from app import db
 
 from helper.Response import Response
 from helper.Transformer import Transformer
+
+import os, json, re, ast
+from app import db
+from pprint import pprint
 
 
 class TipoDatoManager:
@@ -108,31 +110,43 @@ class SelectFormatter:
             formatted_row = {
                 "label":row.nombre,
                 "value":row.tipo_dato_id,
-                "config":Config(row.config).to_dict()
+                "config":Config(row.config).to_dict()                
             }
-            formatted_records.append(formatted_row)
+            formatted_records.append(formatted_row)              
         return formatted_records
 
 class Config:
     def __init__(self, data):
-        self.data = data
+        self.data = data.strip()
     def to_dict(self):
-        parts = self.data.split('\n')
+        if self.data == "":
+            return []
+
+        parts = self.data.split('\n')        
         return self.make_params(parts)
 
     def make_params(self, parts):
         params = []
         for item in parts:
-            params.append(self.to_element(item))
+            element = self.to_element(item)
+            if element is not None:
+                params.append(element)
         return params
 
     def to_element(self, item):
         element = {}
+
+        if item == "":
+            return None
+        
         fields = item.split(',')
+
         for cell in fields:
             cell_parts = cell.split(':')
+
             cell_key = cell_parts[0] 
             cell_value = cell_parts[1]
-            element = {cell_key, cell_value}
+            element[cell_key] = cell_value
+
         return element
 
