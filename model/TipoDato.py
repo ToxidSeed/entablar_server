@@ -7,4 +7,5 @@ class TipoDato(db.Model):
     nombre = db.Column(db.String(45))
     descripcion = db.Column(db.String(100))
     config = db.Column(db.String(1000))
+    config_raw = db.Column(db.String(1000))
     

@@ -6,6 +6,7 @@ from model.ProveedorBD import ProveedorBD
 from helper.Response import Response
 from helper.Transformer import Transformer
 
+#
 import os, json, re, ast
 from app import db
 from pprint import pprint
@@ -16,21 +17,84 @@ class TipoDatoManager:
     def __init__(self):
         pass
 
-    def guardar(self, data={}):        
+    def guardar(self, data={}):    
 
-        tipo_dato = TipoDato(
-            proveedor_bd_id=data["dbms_id"],
-            nombre=data["nombre"],
-            descripcion=data["descripcion"],
-            config=data["config"]
-        )
+        tipo_dato_id = data["id"]    
 
-        db.session.add(tipo_dato)
+        tipo_dato = None
+        if tipo_dato_id in ["",0]:
+            tipo_dato = TipoDato(
+                proveedor_bd_id=data["dbms_id"],
+                nombre=data["nombre"],
+                descripcion=data["descripcion"],
+                #config=data["config"],
+                config_raw=data["config_raw"],
+                config=json.dumps(self._raw_config_to_dict(data["config_raw"]))
+            )            
+            db.session.add(tipo_dato)
+        else:
+            tipo_dato = TipoDato.query.filter(
+                TipoDato.tipo_dato_id == tipo_dato_id
+            ).one()
+
+            tipo_dato.nombre = data["nombre"]
+            tipo_dato.descripcion=data["descripcion"]
+            tipo_dato.config_raw=data["config_raw"]
+            tipo_dato.config = json.dumps(self._raw_config_to_dict(data["config_raw"]))
+        
         db.session.commit()
 
         msg = "Se ha guardado el tipo de dato con código {}".format(tipo_dato.tipo_dato_id)
 
         return Response(msg=msg,input_data=tipo_dato).get()
+
+    def _raw_config_to_dict(self, config):
+        config_dict = {}
+        config_list = self._parse_config(config)
+        for item in config_list:
+            config_dict[item["var"]] = item
+        return config_dict
+
+
+    def _parse_config(self, config):
+        parsed_lines = []
+
+        lines = config.split("\n")
+        parsed_lines = self._process_list(lines)        
+        
+        return parsed_lines
+
+    def _process_list(self,lines):  
+        parsed_list =  []      
+        for line in lines:
+            parts = line.split(",")
+            parsed_line = self._process_parts(parts)       
+            #add full parsed line
+            parsed_list.append(parsed_line)
+        return parsed_list
+
+    def _process_parts(self, parts):
+        parsed_element = {}
+        for item in parts:
+            elements = item.split(":")
+            key = elements[0]
+            value = elements[1]
+            parsed_element[key] = value
+        return parsed_element
+
+    def _get_tipo_dato_vars(self):
+        vars_value = {}
+        if "tipo_dato_vars" in self.column_props:
+            vars_value = json.loads(self.column_props["tipo_dato_vars"]["valor"]) 
+        return vars_value
+    
+    def _get_prop_val(self, var):
+        result = {"valor":""}
+
+        if var in self.tipo_dato_vars:
+            result["valor"] = self.tipo_dato_vars[var]
+        
+        return result
     
 
     def new(self, data={}):
@@ -107,10 +171,14 @@ class SelectFormatter:
         formatted_records = []
 
         for row in records:
+            config = ""
+            if row.config != "":
+                config = json.loads(row.config)
+
             formatted_row = {
                 "label":row.nombre,
                 "value":row.tipo_dato_id,
-                "config":Config(row.config).to_dict()                
+                "config":config
             }
             formatted_records.append(formatted_row)              
         return formatted_records

@@ -6,6 +6,8 @@ from app import app, db
 from flask_mail import Mail, Message
 from flask import url_for
 
+from helper.Response import Response
+
 class SessionManager:    
     def __init__(self):
         pass
@@ -13,7 +15,7 @@ class SessionManager:
     def login(self, args):
         if(args["provider"] == "google" ):
             google_manager = GoogleManager()
-            google_manager.login(args)  
+            return google_manager.login(args)  
 
     def confirm(self, token):
         serializer = URLSafeSerializer(app.config['SECRET_KEY'])
@@ -33,10 +35,19 @@ class GoogleManager:
 
         email = credentials.id_token['email']
 
-        usuario_info = Usuario.query.filter_by(email=email).first()
+        user_info = db.session.query(
+            Usuario.id,
+            Usuario.nombre,
+            Usuario.email
+        ).filter(
+            Usuario.email == email 
+        ).first()        
 
-        if(usuario_info is None):
-            self.register(credentials.id_token)
+        if(user_info is None):
+            self.register(credentials.id_token)        
+            return Response(msg="Usuario registrado, pendiente de confirmar", success=True).get()        
+        else:
+            return Response(input_data=user_info, success=True).get()        
 
 
     def register(self, login_data):

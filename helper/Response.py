@@ -5,13 +5,13 @@ import json
 
 
 class Response:
-    def __init__(self,success=True, code=0, data=None, msg="", input_data=None, formatter=None):
+    def __init__(self,success=True, code=0, data=None, msg="", input_data=None, formatter=None, extradata={}):
         self.answer = {
             "success":success,
             "code":code,
             "data":data,            
             "message":msg,
-            "extradata":{}
+            "extradata":extradata
         }
         self.input_data = input_data
         self.formatter = formatter
@@ -35,8 +35,11 @@ class Response:
             if type(self.input_data).__name__ in ["dict"]:
                 self.answer["data"] = self.input_data
 
-            if type(self.input_data).__name__ in ["list", "ResultProxy"]:
+            if type(self.input_data).__name__ in ["list", "ResultProxy","LegacyCursorResult"]:
                 self.answer["data"] = self.__process_list()
+
+            if type(self.input_data).__name__ in ["Row"]:
+                self.answer["data"] = self.__process_element(self.input_data)
 
     def __process_model(self, element=None):
         return {c.key: str(getattr(element, c.key)) for c in inspect(element).mapper.column_attrs}
@@ -52,7 +55,7 @@ class Response:
         record = element
         if any("Model" == base.__name__ for base in element.__class__.__bases__):
             record = self.__process_model(element)            
-        if element.__class__.__name__ == 'result':
+        if element.__class__.__name__ in ['result','LegacyRow', 'Row']:
             record = Transformer(element._asdict()).to_parseable_json_dict()
         if element.__class__.__name__ == 'RowProxy':
             record = Transformer(dict(element.items())).to_parseable_json_dict()            

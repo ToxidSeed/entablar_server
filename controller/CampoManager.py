@@ -1,14 +1,14 @@
+#models
 from model.ModelCampo import ModelCampo
 from model.Objeto import Objeto
 from model.ObjetoProps import ObjetoProps
 from model.ProveedorBD import ProveedorBD
 from model.TipoDato import TipoDato
 
-from domain.DomainCampo import DomainCampo
-from sqlalchemy import and_
-import json
+#helpers
 from helper.Response import JsonResponse, Response
 from helper.Transformer import Transformer
+from helper.StatusMessage import StatusMessage
 
 #aux
 import aux.TipoObjeto as TipoObjeto
@@ -16,6 +16,11 @@ import aux.EstadoCodigo as EstadoCodigo
 
 #python
 from datetime import datetime
+from sqlalchemy.orm import aliased
+from flask_sqlalchemy import get_debug_queries
+from pprint import pprint
+from sqlalchemy import and_
+import json
 
 #app
 from app import db
@@ -49,7 +54,7 @@ class CampoManager:
 
         #get database
         database = Objeto.query.filter(
-            Objeto.id == tabla_dict["DATABASE_ID"]
+            Objeto.id == tabla_dict["database_id"]
         ).first()
 
         #get schema
@@ -71,25 +76,9 @@ class CampoManager:
 
 
     def guardar(self, data={}):
-        """obj = DomainCampo()
-        obj.tabla_id                = data["tabla_id"]
-        obj.campo_id                = data["campo_id"]
-        obj.nombre                  = data["nombre"]
-        obj.descripcion             = data["descripcion"]
-        obj.flg_obligatorio       = data["flg_obligatorio"]
-        obj.flg_pk                  = data["flg_pk"]
-        obj.tipo_dato_id            = data["tipo_dato_id"]
-        obj.tipo_dato_data = data["tipo_dato_data"]
-        obj.tipo_dato_text = self.get_tipo_dato_text(data["tipo_dato_data"], data["tipo_dato_syntax"])
-        obj.tipo_dato_syntax = data["tipo_dato_syntax"]
-
-        if obj.campo_id != 0 and obj.campo_id != "":
-            self.model.actualizar(obj)
-        else:
-            self.model.insertar(obj)
-        return obj.__dict__"""
 
         campo_id = data["campo_id"]
+        tipo_dato_id = data["tipo_dato_id"]
 
         campo = None
 
@@ -99,7 +88,7 @@ class CampoManager:
                 nombre=data["nombre"],
                 tipo_objeto_id=TipoObjeto.CAMPO,
                 dbms_id=data["dbms_id"],                
-                desc_abreviada="",
+                desc_abreviada=data["desc_abreviada"],
                 desc_completa=data["desc_completa"],
                 estado_id = EstadoCodigo.OBJETO_BORRADOR,
                 fch_creacion=datetime.now()
@@ -111,14 +100,21 @@ class CampoManager:
         else:        
             campo = Objeto.query.filter(
                 Objeto.id == campo_id
-            )
+            ).one()
 
-            campo.desc_completa=data["desc_completa"]
+            campo.nombre = data["nombre"]
+            campo.desc_abreviada=data["desc_abreviada"]
+            campo.desc_completa=data["desc_completa"]            
             campo.fch_modificacion=datetime.now()
-
+        
         #save props
-        ColumnProps(data, campo.id).save()
-
+        column_props = ColumnProps(campo.id)
+        column_props.load_data_type(tipo_dato_id)
+        status = column_props.save(column_id=campo.id, data=data)
+        if status.success == False:
+            return status.make_response()
+        
+        #return messages
         message = "Se ha guardado correctamente el campo con id: {}".format(campo.id)
         extradata  = {
             "campo_id":campo.id
@@ -126,13 +122,14 @@ class CampoManager:
 
         db.session.commit()
 
-        return Response(msg=message, data=extradata).get()
+        return Response(msg=message, data=extradata).get()       
 
     def get_tipo_dato_text(self, data, syntax=""):
         tipo_dato_text_str = ''
         data_dict = json.loads(data)
 
-        # Los datos se encuentran en el campo tipo_dato_data almacenado json
+        # Los datos se encuentran en el campo tipo_dato
+        # _data almacenado json
         for key, value in data_dict.items():
             if len(tipo_dato_text_str) == 0:
                 tipo_dato_text_str = syntax
@@ -148,53 +145,211 @@ class CampoManager:
 
 
     def get_campos_por_tabla(self, args={}):
-        """campos_found = Objeto.query.filter(
-            and_(
-                Objeto.tipo_objeto_id == self.TIPO_OBJETO_CAMPO,
-                Objeto.objeto_padre_id == args["tabla_id"]
-            )
+        campo = aliased(Objeto, name="campo")
+
+        result_set = db.session.query(
+            campo.id,
+            campo.nombre,
+            campo.dbms_id,
+            campo.desc_abreviada,
+            campo.desc_completa,
+            campo.estado_id,
+            campo.fch_creacion,
+            campo.fch_modificacion,
+            campo.objeto_padre_id.label("tabla_id"),   
+            TipoDato.nombre.label("tipo_dato_nombre")         
+        ).outerjoin(ObjetoProps, campo.id == ObjetoProps.objeto_id).\
+        outerjoin(TipoDato, ObjetoProps.valor == TipoDato.tipo_dato_id).\
+        filter(                        
+            campo.objeto_padre_id == args["tabla_id"],
+            ObjetoProps.nombre == "tipo_dato_id"
         ).all()
-        
-        return Response(input_data=campos_found).get()"""
 
-    def get(self, data={}):
-        """params = (data["campo_id"],)
-        query_str = self.model.get_query("campo_get")
-        obj = self.model.get_single_result(query_str, params)
-        return obj"""
+        props = db.session.query(
+            ObjetoProps.id,
+            ObjetoProps.objeto_id.label('campo_id'),
+            ObjetoProps.nombre,
+            ObjetoProps.valor
+        ).filter(
+            ObjetoProps.objeto_id == Objeto.id,
+            Objeto.objeto_padre_id == args["tabla_id"]
+        ).all()
 
-        campo = Objeto.query.filter(
-            Objeto.id == data["campo_id"]
+        return Response(input_data=result_set,formatter=CampoListaFormatter(props=props)).get()
+
+    def get(self, data={}):      
+        campo = aliased(Objeto, name="campo")
+        tabla = aliased(Objeto, name="tabla")
+        dbms = aliased(ProveedorBD, name="dbms")        
+
+        result_set = db.session.query(
+            campo.id,
+            campo.nombre,
+            campo.dbms_id,
+            dbms.nombre.label("dbms_nombre"),
+            campo.desc_abreviada,
+            campo.desc_completa,
+            campo.estado_id,
+            campo.fch_creacion,
+            campo.fch_modificacion,
+            campo.objeto_padre_id.label("tabla_id"),
+            tabla.nombre.label("tabla_nombre")            
+        ).filter(
+            campo.objeto_padre_id == tabla.id,
+            campo.dbms_id == dbms.proveedor_bd_id,
+            campo.id == data["campo_id"]
         ).one()
 
-        """campo_dict = Transformer(campo).model_to_dict()
+        #get the props
+        props = ColumnProps(data["campo_id"]).get_props(_asdict=True)
 
-        campo_props = ObjetoProps.query.filter(
-            ObjetoProps.objeto_id == data["campo_id"]
-        ).all()
+        #get the data type and data
+        tipo_dato = self._get_tipo_dato(props)        
+             
+        #pprint(tipo_dato)        
+        response = Response(input_data=result_set)
+        response.add_extradata("tipo_dato",tipo_dato)
+        response.add_extradata("props",props)
+        return response.get()
 
-        campo_dict["props"]={}
-        for prop in campo_props:
-            campo_dict["props"][prop.nombre] = Transformer(prop).model_to_dict()
+    def _get_tipo_dato(self, props):
+        tipo_dato_dict = {}
 
-        return Response(input_data=campo_dict).get()"""
+        tipo_dato = TipoDato.query.filter(
+            TipoDato.tipo_dato_id == props["tipo_dato_id"]["valor"]
+        ).first()
+
+        if tipo_dato is not None:            
+            tipo_dato_dict = Transformer(tipo_dato).model_to_dict()   
+            config = json.loads(tipo_dato.config)
+            config_with_values = self._get_tipo_dato_vars_value(config, props["tipo_dato_vars"])
+            tipo_dato_dict["config"] = config_with_values
+
+        return tipo_dato_dict
+
+    def _get_tipo_dato_vars_value(self, config={}, tipo_dato_vars={}):
+        data_vars = json.loads(tipo_dato_vars["valor"])
+        for key, value in config.items():
+            config[key]["value"] = data_vars[key]
+
+        return config
 
 
+class CampoListaFormatter:
+    def __init__(self, props = []):        
+        self.props = props
+        self.grouped = {}
+
+    def format(self, records):
+        #prepare groups
+        self._group_props()
+
+        #eval row by row
+        formatted_records = []
+
+        for row in records:
+            row_dict = dict(row)            
+            row_dict["props"] = self._get_props(row_dict["id"])
+            formatted_records.append(row_dict)
+    
+        return formatted_records
+
+
+    def _get_props(self, campo_id=None):
+        if campo_id in self.grouped:
+            return self.grouped[campo_id]
+        else:
+            return {}
+
+    def _group_props(self):        
+        
+        for item in self.props:
+            valor = None
+            if item.nombre == "tipo_dato_vars":
+                valor = json.loads(item.valor)
+            else:
+                valor = item.valor
+
+            if item.campo_id not in self.grouped:
+                self.grouped[item.campo_id] = {
+                    item.nombre:valor
+                }
+            else:
+                self.grouped[item.campo_id][item.nombre] = valor
 
 class ColumnProps:
-    def __init__(self, data, column_id):
-        self.data = data
-        self.column_id = column_id
-        self.props = [
-            {"nombre":"TIPO_DATO_ID","valor":data["tipo_dato_id"], "objeto_id":column_id}
-        ]
+    def __init__(self, column_id=None):
+        self.status = StatusMessage()   
+        self.column_id = column_id                
+        self.props = []
+        self.tipo_dato = None
 
-        for param in data["tipo_dato_params"]:
-            self.props.append(
-                {"nombre":param["var"],"valor":param["valor"], "objeto_id":column_id}
+    def load_data_type(self, tipo_dato_id):
+        self.tipo_dato = TipoDato.query.filter(TipoDato.tipo_dato_id == tipo_dato_id).first()                    
+
+    def _add_prop(self, key, value):
+        self.props.append(
+                {"nombre":key,"valor":value, "objeto_id":self.column_id}
             )
 
-    def save(self):                
+    def _add_tipo_dato_vars(self, params={}):
+        tipo_dato_vars = {
+            "nombre":"tipo_dato_vars",
+            "flg_activo":"S",
+            "valor":{}
+        }
+
+        prop_valor = {}
+
+        for var, item in params.items():
+            prop_valor[var] = item["value"]
+        
+        tipo_dato_vars["valor"] = json.dumps(prop_valor)
+        self.props.append(tipo_dato_vars)
+        return tipo_dato_vars
+
+    def _add_tipo_dato_pattern(self):        
+        prop = {
+            "nombre":"tipo_dato_pattern",
+            "flg_activo":"S",
+            "valor":self.tipo_dato.nombre
+        }
+
+        self.props.append(prop)
+        return prop
+
+    def _add_tipo_dato_def(self, tipo_dato_vars = None, tipo_dato_syntax=""):
+        tipo_dato_def = ""
+        if tipo_dato_vars is not None:
+            vars_as_dict = json.loads(tipo_dato_vars["valor"])
+
+            for key, value in vars_as_dict.items():
+
+                var_to_replace = "%"+key
+                tipo_dato_def = tipo_dato_syntax.replace(var_to_replace, value)        
+
+        prop = {
+            "nombre":"tipo_dato_def",
+            "flg_activo":"S",
+            "valor":tipo_dato_def
+        }
+        self.props.append(prop)
+
+    def save(self, column_id=None, data={}):
+        self.save_validation(data)
+        if self.status.success == False:
+            return self.status
+
+        #begin process
+        self._add_prop("flg_pk",data["flg_pk"])
+        self._add_prop("flg_mandatory",data["flg_mandatory"])
+        self._add_prop("tipo_dato_id",data["tipo_dato_id"])
+        self._add_prop("project_id",data["project_id"])
+        prop_tipo_dato_vars = self._add_tipo_dato_vars(data["tipo_dato_params"])
+        prop_tipo_dato_syntax = self._add_tipo_dato_pattern()
+        self._add_tipo_dato_def(prop_tipo_dato_vars, prop_tipo_dato_syntax["valor"])
+
+        #processing props
         for item in self.props:
             prop = ObjetoProps.query.filter(
                 ObjetoProps.nombre == item["nombre"],
@@ -213,6 +368,50 @@ class ColumnProps:
                 )
 
                 db.session.add(prop)
-    
-    
+
+        return self.status
+
+    def save_validation(self, data={}):
+        if "flg_pk" not in data:
+            return self.status.error("flg_pk no enviado")
+        if "flg_mandatory" not in data:
+            return self.status.error("flg_mandatory no enviado")
+        if "tipo_dato_id" not in data:
+            return self.status.error("tipo_dato_id no enviado")
+        if "project_id" not in data:
+            return self.status.error("project_id no enviado")
+        if "tipo_dato_params" not in data:
+            return self.status.error("tipo_dato_params no enviado")
+        return self.status
+
+    def get_props(self, _asdict=False):
+        result = {}
+
+        rows = ObjetoProps.query.filter(
+            ObjetoProps.objeto_id == self.column_id            
+        ).all()
+
+        for objeto_prop in rows:
+            if _asdict == True:
+                result[objeto_prop.nombre] = Transformer(objeto_prop).model_to_dict()                
+            else:
+                result[objeto_prop.nombre] = objeto_prop
+
+        return result
+
+    def _get_props(self):
+        result = {}
+
+        rows = ObjetoProps.query.filter(
+            ObjetoProps.objeto_id == self.column_id            
+        ).all()
+
+        for objeto_prop in rows:
+            if objeto_prop.nombre == "tipo_dato_pattern":
+                result[objeto_prop.nombre] = dict(objeto_prop.valor)
+            else:
+                result[objeto_prop.nombre] = objeto_prop.valor
+
+        return result
+
 
